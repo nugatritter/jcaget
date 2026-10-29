@@ -31,8 +31,10 @@ import java.util.concurrent.TimeUnit;
  * value with units, alarm state, timestamp, read/write access, enum states, display/control/alarm limits,
  * precision, native type, element count, server and, for IOC records, record type and description.
  * All PVs are connected and read in parallel; the output keeps the order of the arguments.
+ * With --readonly, only PVs the user may read but not write are shown; with --invalid, only PVs with
+ * severity INVALID_ALARM. Both together show only PVs that meet both conditions.
  *
- * Usage: java -jar jcaget.jar info PVName [PVName ...]
+ * Usage: java -jar jcaget.jar info [--readonly] [--invalid] PVName [PVName ...]
  */
 public final class JCaInfo {
 
@@ -43,6 +45,9 @@ public final class JCaInfo {
     private static final int LINE_WIDTH = 80;
     private static final String INDENT = "    ";
     private static final String NO_ALARM = "NO_ALARM";
+    private static final String INVALID_ALARM = "INVALID_ALARM";
+    private static final String READ_ONLY_OPTION = "--readonly";
+    private static final String INVALID_OPTION = "--invalid";
 
     /** Reads per PV, in this order: value with timestamp, metadata, record type, description. */
     private static final int TIME = 0;
@@ -55,21 +60,34 @@ public final class JCaInfo {
     }
 
     public static void main(String[] args) {
+        boolean onlyReadOnly = false;
+        boolean onlyInvalid = false;
+        int options = 0;
+        for (; options < args.length && args[options].startsWith("--"); options++) {
+            if (args[options].equals(READ_ONLY_OPTION)) {
+                onlyReadOnly = true;
+            } else if (args[options].equals(INVALID_OPTION)) {
+                onlyInvalid = true;
+            } else {
+                System.err.println("Unknown option: " + args[options]);
+                usage();
+            }
+        }
+        args = Arrays.copyOfRange(args, options, args.length);
         if (args.length < 1) {
-            System.err.println("Usage: java -jar jcaget.jar info <PVName> [PVName ...]");
-            System.exit(2);
+            usage();
         }
         int failed = 0;
         Context ctxt = null;
         try {
             ctxt = JCALibrary.getInstance().createContext(JCALibrary.CHANNEL_ACCESS_JAVA);
-            String[] blocks = read(ctxt, args);
+            String[] blocks = read(ctxt, args, onlyReadOnly, onlyInvalid);
             boolean first = true;
             for (int i = 0; i < args.length; i++) {
                 if (blocks[i] == null) {
                     System.err.println(args[i] + "  *** not connected (timeout)");
                     failed++;
-                } else {
+                } else if (!blocks[i].isEmpty()) {
                     if (!first) {
                         System.out.println();
                     }
@@ -86,11 +104,17 @@ public final class JCaInfo {
         System.exit(failed > 0 ? 1 : 0);
     }
 
+    private static void usage() {
+        System.err.println("Usage: java -jar jcaget.jar info [" + READ_ONLY_OPTION + "] [" + INVALID_OPTION
+                + "] <PVName> [PVName ...]");
+        System.exit(2);
+    }
+
     /** Reads everything available about the PV and returns it as a multi-line block like the command line tool. */
     public static String info(String pvName) throws CAException, TimeoutException {
         Context ctxt = JCALibrary.getInstance().createContext(JCALibrary.CHANNEL_ACCESS_JAVA);
         try {
-            String block = read(ctxt, new String[] {pvName})[0];
+            String block = read(ctxt, new String[] {pvName}, false, false)[0];
             if (block == null) {
                 throw new TimeoutException("PV '" + pvName + "' not reachable");
             }
@@ -100,8 +124,13 @@ public final class JCaInfo {
         }
     }
 
-    /** Connects all PVs, then the fields of their records, then reads everything at once. Null if not connected. */
-    private static String[] read(Context ctxt, String[] pvs) throws CAException {
+    /**
+     * Connects all PVs, then the fields of their records, then reads everything at once.
+     * Null if not connected, empty if left out by a filter: onlyReadOnly and the PV is not read only,
+     * or onlyInvalid and the severity is not INVALID_ALARM (or unknown, because the value cannot be read).
+     */
+    private static String[] read(Context ctxt, String[] pvs, boolean onlyReadOnly, boolean onlyInvalid)
+            throws CAException {
         Channel[] channels = new Channel[pvs.length];
         for (int i = 0; i < pvs.length; i++) {
             channels[i] = ctxt.createChannel(pvs[i]);
@@ -112,7 +141,7 @@ public final class JCaInfo {
         DBRType[] types = new DBRType[sources.length];
         boolean anyConnected = false;
         for (int i = 0; i < pvs.length; i++) {
-            if (channels[i].getConnectionState() != Channel.CONNECTED) {
+            if (channels[i].getConnectionState() != Channel.CONNECTED || onlyReadOnly && !readOnly(channels[i])) {
                 continue;
             }
             anyConnected = true;
@@ -134,9 +163,12 @@ public final class JCaInfo {
         DBR[] results = get(ctxt, sources, types);
         String[] blocks = new String[pvs.length];
         for (int i = 0; i < pvs.length; i++) {
-            if (channels[i].getConnectionState() == Channel.CONNECTED) {
-                blocks[i] = format(pvs[i], channels[i], Arrays.copyOfRange(results, i * READS, (i + 1) * READS));
+            if (channels[i].getConnectionState() != Channel.CONNECTED) {
+                continue;
             }
+            DBR[] r = Arrays.copyOfRange(results, i * READS, (i + 1) * READS);
+            boolean shown = (!onlyReadOnly || readOnly(channels[i])) && (!onlyInvalid || invalid(r[TIME]));
+            blocks[i] = shown ? format(pvs[i], channels[i], r) : "";
         }
         return blocks;
     }
@@ -339,6 +371,16 @@ public final class JCaInfo {
             return "read, write";
         }
         return read ? "read only" : write ? "write only" : "none";
+    }
+
+    /** True if the user may read but not write the PV, shown as "read only" under Access. */
+    private static boolean readOnly(Channel channel) {
+        return channel.getReadAccess() && !channel.getWriteAccess();
+    }
+
+    /** True if the value was read and has severity INVALID_ALARM. */
+    private static boolean invalid(DBR time) {
+        return time != null && INVALID_ALARM.equals(((TIME) time).getSeverity().getName());
     }
 
     /** EPICS name of the native field type as shown by cainfo; JCA calls DBF_LONG "INT" and DBF_CHAR "BYTE". */

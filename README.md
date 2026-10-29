@@ -18,19 +18,19 @@ Einfache `caget`/`camonitor`/`caput`/`cainfo`-Werkzeuge in Java für EPICS-Varia
 mvn package
 ```
 
-Ergebnis ist die ausführbare JAR `target/jcaget-1.1.0.jar` mit allen Abhängigkeiten.
-(`target/original-jcaget-1.1.0.jar` enthält keine Abhängigkeiten und ist nicht zur Weitergabe gedacht.)
+Ergebnis ist die ausführbare JAR `target/jcaget-1.3.0.jar` mit allen Abhängigkeiten.
+(`target/original-jcaget-1.3.0.jar` enthält keine Abhängigkeiten und ist nicht zur Weitergabe gedacht.)
 
 ## Verwendung
 
 ```
-java -jar jcaget-1.1.0.jar [get] <PVName> [PVName ...]
+java -jar jcaget-1.3.0.jar [get] <PVName> [PVName ...]
 ```
 
 Beispiel:
 
 ```
-$ java -jar jcaget-1.1.0.jar SOME:PV:NAME
+$ java -jar jcaget-1.3.0.jar SOME:PV:NAME
 SOME:PV:NAME  2026-10-27 14:45:49.123  3.14          NO_ALARM      NO_ALARM
 ```
 
@@ -44,7 +44,7 @@ Ist die Ausgabe ein Terminal, werden Zeilen mit Alarm (Status oder Severity ≠ 
 `MINOR` gelb, `MAJOR` rot, `INVALID` magenta. Zeilen ohne Alarm bleiben ungefärbt.
 
 - Bei Umleitung in eine Datei oder Pipe wird nicht gefärbt; die Umgebungsvariable `NO_COLOR` schaltet die Farben ebenfalls ab.
-- Erzwingen oder abschalten: `java -jar jcaget-1.1.0.jar --color=always|never|auto monitor <PVName>`
+- Erzwingen oder abschalten: `java -jar jcaget-1.3.0.jar --color=always|never|auto monitor <PVName>`
 - Linux/macOS-Terminals und Windows Terminal (Windows 10/11) unterstützen ANSI-Farben. Im alten Windows-`cmd`-Fenster (conhost)
   erscheinen sie ggf. als Steuerzeichen; dann `--color=never` verwenden.
 
@@ -53,7 +53,7 @@ Ist die Ausgabe ein Terminal, werden Zeilen mit Alarm (Status oder Severity ≠ 
 Gibt jede Wertänderung aus, bis das Programm mit Strg+C beendet wird:
 
 ```
-java -jar jcaget-1.1.0.jar monitor <PVName> [PVName ...]
+java -jar jcaget-1.3.0.jar monitor <PVName> [PVName ...]
 ```
 
 ### jcaput
@@ -61,7 +61,7 @@ java -jar jcaget-1.1.0.jar monitor <PVName> [PVName ...]
 Schreibt einen Wert (bei Array-PVs mehrere, durch Leerzeichen getrennt). Die Umwandlung in den Typ des PVs übernimmt Channel Access:
 
 ```
-java -jar jcaget-1.1.0.jar put <PVName> <Wert> [Wert ...]
+java -jar jcaget-1.3.0.jar put <PVName> <Wert> [Wert ...]
 ```
 
 ### jcainfo
@@ -69,13 +69,13 @@ java -jar jcaget-1.1.0.jar put <PVName> <Wert> [Wert ...]
 Zeigt alles, was Channel Access über eine PV liefert, übersichtlich als Block pro PV (mehrere PVs durch Leerzeile getrennt):
 
 ```
-java -jar jcaget-1.1.0.jar info <PVName> [PVName ...]
+java -jar jcaget-1.3.0.jar info [--readonly] [--invalid] <PVName> [PVName ...]
 ```
 
 Beispiel:
 
 ```
-$ java -jar jcaget-1.1.0.jar info SOME:AI SOME:VALVE
+$ java -jar jcaget-1.3.0.jar info SOME:AI SOME:VALVE
 SOME:AI  (ai)  "Strahlstrom"
     Value:         390 mA
     Alarm:         HIHI_ALARM  MAJOR_ALARM
@@ -120,13 +120,47 @@ Record-Typ und Beschreibung werden über die Felder `<Record>.RTYP` und `<Record
 `SOME:AI`). Server ohne Records (z. B. reine CA-Server in Java oder Python) bieten diese Felder nicht an; dann fehlt die Angabe
 in der Kopfzeile und die Ausgabe dauert höchstens 1 s länger.
 
+#### Filter (`--readonly`, `--invalid`)
+
+Mit Filtern (direkt nach `info`, in beliebiger Reihenfolge) erscheinen nur die PVs, die die Bedingung erfüllen. Alle anderen
+erreichbaren PVs werden ohne Meldung übergangen.
+
+| Option | Zeigt nur PVs, ... |
+| ------ | ------------------ |
+| `--readonly` | die der aktuelle Benutzer auf dem aktuellen Rechner lesen, aber nicht schreiben darf (`Access: read only`) |
+| `--invalid` | deren Severity `INVALID_ALARM` ist (z. B. noch nie verarbeitet, Hardware nicht erreichbar, Link gestört) |
+
+Beide Filter zusammen zeigen nur PVs, die beide Bedingungen erfüllen. So lässt sich z. B. prüfen, welche PVs einer Liste per `put`
+nicht beschrieben werden können oder welche derzeit ungültige Werte liefern:
+
+```
+$ java -jar jcaget-1.3.0.jar info --readonly SOME:AI SOME:VALVE
+SOME:AI  (ai)  "Strahlstrom"
+    Value:         390 mA
+    ...
+    Access:        read only
+    ...
+
+$ java -jar jcaget-1.3.0.jar info --invalid SOME:AI SOME:TEMP SOME:VALVE
+SOME:TEMP  (ai)  "Temperatur Kühlwasser"
+    Value:         0 °C
+    Alarm:         READ_ALARM  INVALID_ALARM
+    ...
+```
+
+- `--readonly`: PVs ohne jedes Zugriffsrecht (`none`) oder nur mit Schreibrecht (`write only`) zählen nicht als schreibgeschützt.
+- `--invalid`: PVs ohne Leserecht werden übergangen, da ihre Severity unbekannt ist. Andere Alarme (`MINOR`, `MAJOR`) zählen nicht.
+- Nicht erreichbare PVs werden weiterhin als Timeout gemeldet (Exit-Code 1), da über sie nichts bekannt ist.
+- Werden alle PVs herausgefiltert, ist die Ausgabe leer und der Exit-Code 0.
+- Eine unbekannte Option (z. B. `--foo`) führt zu Exit-Code 2.
+
 ### Exit-Codes (gilt für alle Programme)
 
 | Code | Bedeutung |
 |------|-----------|
 | 0    | Erfolgreich (alle PVs erreicht) |
 | 1    | Timeout (PV nicht erreichbar, 5 s) oder Channel-Access-Fehler |
-| 2    | Falscher Aufruf (falsche Anzahl Argumente) |
+| 2    | Falscher Aufruf (falsche Anzahl Argumente, unbekannte Option) |
 
 ### Netzwerk-Konfiguration
 

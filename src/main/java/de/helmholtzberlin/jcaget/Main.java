@@ -7,7 +7,8 @@ import java.util.logging.Logger;
 /**
  * Entry point of the JAR: dispatches to get, put, monitor or info.
  *
- * Usage: java -jar jcaget.jar [get|monitor|info] PVName [PVName ...] | put PVName Value [Value ...]
+ * Usage: java -jar jcaget.jar [get|monitor|info [--readonly] [--invalid]] PVName [PVName ...]
+ *        | put PVName Value [Value ...]
  * Without a command, get is assumed. Option --color=auto|always|never (default auto) before the command.
  */
 public final class Main {
@@ -27,7 +28,7 @@ public final class Main {
             System.err.println("Usage: java -jar jcaget.jar [--color=auto|always|never] [get] <PVName> [PVName ...]\n"
                     + "       java -jar jcaget.jar monitor <PVName> [PVName ...]\n"
                     + "       java -jar jcaget.jar put <PVName> <Value> [Value ...]\n"
-                    + "       java -jar jcaget.jar info <PVName> [PVName ...]");
+                    + "       java -jar jcaget.jar info [--readonly] [--invalid] <PVName> [PVName ...]");
             System.exit(2);
         }
         CAJ_LOGGER.setLevel(Level.WARNING); // hide beacon INFO messages
