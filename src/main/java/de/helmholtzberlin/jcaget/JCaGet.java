@@ -117,7 +117,7 @@ public final class JCaGet {
         return n;
     }
 
-    private static void destroy(Context ctxt) {
+    static void destroy(Context ctxt) {
         if (ctxt != null) {
             try {
                 ctxt.destroy();

@@ -6,7 +6,7 @@
 
   <groupId>de.helmholtzberlin</groupId>
   <artifactId>jcaget</artifactId>
-  <version>1.0.0</version>
+  <version>1.1.0</version>
   <packaging>jar</packaging>
   <name>jcaget</name>
   <description>Simple caget-like command line tool to read an EPICS PV</description>

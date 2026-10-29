@@ -15,7 +15,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 
-/** Shared request type selection and output formatting for get and monitor. */
+/** Shared request type selection and output formatting for get, monitor and info. */
 final class PvFormat {
 
     /** Seconds between 1970-01-01 (Unix) and 1990-01-01 (EPICS epoch). */
@@ -27,6 +27,7 @@ final class PvFormat {
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS").withZone(ZoneId.systemDefault());
 
     private static final String RESET = "[0m";
+    private static final String BOLD = "[1m";
     private static final String BOLD_YELLOW = "[1;33m";
     private static final String BOLD_RED = "[1;31m";
     private static final String BOLD_MAGENTA = "[1;35m";
@@ -84,18 +85,42 @@ final class PvFormat {
         return DBRType.TIME_STRING;
     }
 
+    /** The DBR_CTRL_* type with units, precision, limits or enum labels; null for strings, which have none. */
+    static DBRType ctrlType(Channel channel) throws CAException {
+        DBRType t = channel.getFieldType();
+        if (t == DBRType.DOUBLE) {
+            return DBRType.CTRL_DOUBLE;
+        } else if (t == DBRType.FLOAT) {
+            return DBRType.CTRL_FLOAT;
+        } else if (t == DBRType.INT) {
+            return DBRType.CTRL_INT;
+        } else if (t == DBRType.SHORT) {
+            return DBRType.CTRL_SHORT;
+        } else if (t == DBRType.BYTE) {
+            return DBRType.CTRL_BYTE;
+        } else if (t == DBRType.ENUM) {
+            return DBRType.CTRL_ENUM;
+        }
+        return null;
+    }
+
     /** One line: name (padded to nameWidth), timestamp, value, status, severity. */
     static String line(String pv, int nameWidth, DBR dbr) {
         TIME time = (TIME) dbr;
         STS sts = time;
         String status = sts.getStatus().getName();
         String severity = sts.getSeverity().getName();
-        String alarm = pad(status, STATUS_WIDTH) + "  " + severity;
-        if (useColor() && !(NO_ALARM.equals(status) && NO_ALARM.equals(severity))) {
-            alarm = alarmColor(severity) + alarm + RESET;
-        }
+        String alarm = colorAlarm(pad(status, STATUS_WIDTH) + "  " + severity, status, severity);
         return pad(pv, nameWidth) + "  " + timestamp(time.getTimeStamp()) + "  "
                 + pad(value(dbr.getValue()), VALUE_WIDTH) + "  " + alarm;
+    }
+
+    /** Colors text by severity if colors are on and status or severity differ from NO_ALARM. */
+    static String colorAlarm(String text, String status, String severity) {
+        if (useColor() && !(NO_ALARM.equals(status) && NO_ALARM.equals(severity))) {
+            return alarmColor(severity) + text + RESET;
+        }
+        return text;
     }
 
     /** EPICS convention: MINOR yellow, MAJOR red, INVALID magenta. */
@@ -118,11 +143,19 @@ final class PvFormat {
         return w;
     }
 
-    private static String timestamp(TimeStamp ts) {
-        return TIME_FORMAT.format(Instant.ofEpochSecond(EPICS_EPOCH_OFFSET + ts.secPastEpoch(), ts.nsec()));
+    static String bold(String text) {
+        return useColor() ? BOLD + text + RESET : text;
     }
 
-    private static String value(Object value) {
+    static String timestamp(TimeStamp ts) {
+        return TIME_FORMAT.format(instant(ts));
+    }
+
+    static Instant instant(TimeStamp ts) {
+        return Instant.ofEpochSecond(EPICS_EPOCH_OFFSET + ts.secPastEpoch(), ts.nsec());
+    }
+
+    static String value(Object value) {
         if (value == null || !value.getClass().isArray()) {
             return element(value);
         }
@@ -138,7 +171,7 @@ final class PvFormat {
     }
 
     /** Doubles are rounded to 12 significant digits to hide binary noise like 297.13292559999996. */
-    private static String element(Object o) {
+    static String element(Object o) {
         if (o instanceof Double && !((Double) o).isNaN() && !((Double) o).isInfinite()) {
             BigDecimal d = new BigDecimal((Double) o).round(DOUBLE_PRECISION).stripTrailingZeros();
             if (d.signum() == 0) {
@@ -150,7 +183,7 @@ final class PvFormat {
         return String.valueOf(o);
     }
 
-    private static String pad(String s, int width) {
+    static String pad(String s, int width) {
         StringBuilder sb = new StringBuilder(s);
         while (sb.length() < width) {
             sb.append(' ');
